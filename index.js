@@ -99,13 +99,33 @@ async function run() {
         metadata: {
           parcelId: paymentInfo.parcelId,
         },
-        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
       });
 
       console.log(session);
       res.send({ url: session.url });
-      window.location.href = res.data.url
+      window.location.href = res.data.url;
+    });
+
+    // stripe payment varify and update payment status
+    app.patch("/varify-payment", async (req, res) => {
+      const sessionId = req.query.session_id;
+      console.log("session id:", sessionId);
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      console.log(session);
+      if (session.payment_status === "paid") {
+        const id = session.metadata.parcelId;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: {
+            payment_status: "paid",
+          },
+        };
+        const result = await parcelsCollection.updateOne(query, update);
+        res.send(result);
+      }
+      res.send({ success: false });
     });
 
     await client.db("admin").command({ ping: 1 });
