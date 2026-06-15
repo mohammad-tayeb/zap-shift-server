@@ -1,3 +1,3 @@
 node_modules
 .env
-zap-shift-5458b-firebase-adminsdk-fbsvc-4df268b402.json
+*.json
