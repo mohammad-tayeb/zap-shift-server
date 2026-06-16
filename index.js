@@ -33,13 +33,10 @@ const stripe = require("stripe")(process.env.STRIPE_KEY);
 
 // mongodb
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const { decode } = require("node:punycode");
+// const { decode } = require("node:punycode");
 
 app.use(cors());
 app.use(express.json());
-
-console.log("user:", process.env.DB_USER);
-console.log("pass:", process.env.DB_PASSWORD);
 
 //----------------------------------------------------------jwt middleware
 const varifyFirebaseToken = async (req, res, next) => {
@@ -82,6 +79,7 @@ async function run() {
     const usersCollection = db.collection("users");
     const parcelsCollection = db.collection("parcels");
     const paymentHistoryCollection = db.collection("paymentHistory");
+    const ridersCollection = db.collection("riders");
 
     //new user data posting in database
     app.post("/users", async (req, res) => {
@@ -116,7 +114,6 @@ async function run() {
     // getting all payment history using user email
     app.get("/parcelsHistory", varifyFirebaseToken, async (req, res) => {
       const query = {};
-      console.log("header:", req.headers);
       const { email } = req.query;
       if (email) {
         query.customerEmail = email;
@@ -127,6 +124,80 @@ async function run() {
 
       const options = { sort: { createdAt: -1 } };
       const cursor = paymentHistoryCollection.find(query, options);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    //inserting rider application data in database
+    app.post("/riders", async (req, res) => {
+      const riderData = req.body;
+      riderData.createdAt = new Date();
+      riderData.status = "pending";
+      const emailExist = await ridersCollection.findOne({
+        email: riderData.email,
+      });
+      if (emailExist) {
+        return res
+          .status(409)
+          .send({ message: "Already Applied Using This Email" });
+      }
+      const result = await ridersCollection.insertOne(riderData);
+      console.log(riderData);
+      res.send(result);
+    });
+
+    //get rider applications from db using status = pending
+    app.get("/riders", async (req, res) => {
+      const query = {};
+      const options = { sort: { createdAt: -1 } };
+      if (req.query.status) {
+        query.status = req.query.status;
+      }
+      const cursor = await ridersCollection.find(query, options);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    //set status approved
+    app.patch("/riders/approve/:id", async (req, res) => {
+      const id = req.params.id;
+      const { status, email } = req.body;
+
+      const result = await ridersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: status } },
+      );
+
+      if (status === "approved") {
+        const query = { email };
+        const updateRole = {
+          $set: {
+            role: "rider",
+          },
+        };
+        const roleResult = await usersCollection.updateOne(query, updateRole);
+      }
+
+      res.send({
+        riderUpdate: result,
+        roleUpdate: roleResult,
+      });
+    });
+
+    // delete a rider application
+    app.delete("/riders/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const result = await ridersCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.send(result);
+    });
+
+    //get all users from db
+    app.get("/users", async (req, res) => {
+      const cursor = await usersCollection.find();
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -193,8 +264,6 @@ async function run() {
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
       });
-
-      console.log(session);
       res.send({ url: session.url });
     });
 
@@ -209,8 +278,6 @@ async function run() {
             message: "Session ID is required",
           });
         }
-
-        console.log("Session ID:", sessionId);
 
         // Retrieve Stripe session
         const session = await stripe.checkout.sessions.retrieve(sessionId);
