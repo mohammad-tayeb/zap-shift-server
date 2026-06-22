@@ -108,8 +108,29 @@ async function run() {
     });
 
     app.get("/users", varifyFirebaseToken, async (req, res) => {
-      const cursor = await usersCollection.find();
-      const result = await cursor.toArray();
+      const { search = "", role } = req.query;
+
+      const query = {};
+
+      // status filter (exact match)
+      if (role) {
+        query.role = role;
+      }
+
+      // search filter (name/email)
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      const result = await usersCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .toArray();
+
       res.send(result);
     });
 
@@ -164,12 +185,33 @@ async function run() {
       res.send(result);
     });
 
+    app.patch("/parcels/:id", async (req, res) => {
+      const { parcelId, riderName, riderId, riderEmail } = req.body;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          deliveryStatus: "riderAssigned",
+          riderId: riderId,
+          riderName: riderName,
+          riderEmail: riderEmail,
+        },
+      };
+      const result = await parcelsCollection.updateOne(query, updateDoc);
+      console.log(riderEmail, id);
+      res.send(result);
+    });
+
     app.get("/parcels", varifyFirebaseToken, async (req, res) => {
       const query = {};
-      const { email } = req.query;
+      const { email, deliveryStatus } = req.query;
 
       if (email) {
         query.senderEmail = email;
+      }
+
+      if (deliveryStatus) {
+        query.deliveryStatus = deliveryStatus;
       }
 
       const options = { sort: { createdAt: -1 } };
@@ -288,6 +330,7 @@ async function run() {
           {
             $set: {
               payment_status: "paid",
+              deliveryStatus: "pending-pickup",
               trackingId,
               transactionId,
             },
@@ -340,15 +383,32 @@ async function run() {
     });
 
     app.get("/riders", varifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const query = {};
-      const options = { sort: { createdAt: -1 } };
+      const { search = "", status, workStatus } = req.query;
 
-      if (req.query.status) {
-        query.status = req.query.status;
+      const query = {};
+
+      // status filter (exact match)
+      if (status) {
+        query.status = status;
       }
 
-      const cursor = await ridersCollection.find(query, options);
-      const result = await cursor.toArray();
+      // search filter (name/email)
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      if (workStatus) {
+        query.workStatus = workStatus;
+      }
+
+      const result = await ridersCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
+
       res.send(result);
     });
 
@@ -362,7 +422,7 @@ async function run() {
 
         const result = await ridersCollection.updateOne(
           { _id: new ObjectId(id) },
-          { $set: { status: status } },
+          { $set: { status: status, workStatus: "available" } },
         );
 
         if (status === "approved") {
