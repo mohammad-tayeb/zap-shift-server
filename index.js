@@ -108,8 +108,8 @@ async function run() {
     });
 
     app.get("/users", varifyFirebaseToken, async (req, res) => {
-      const { search = "", role } = req.query;
-
+      const { search = "", role, limit } = req.query;
+      const limitNumber = parseInt(limit);
       const query = {};
 
       // status filter (exact match)
@@ -128,7 +128,7 @@ async function run() {
       const result = await usersCollection
         .find(query)
         .sort({ createdAt: -1 })
-        .limit(5)
+        .limit(limitNumber)
         .toArray();
 
       res.send(result);
@@ -188,8 +188,10 @@ async function run() {
     app.patch("/parcels/:id", async (req, res) => {
       const { parcelId, riderName, riderId, riderEmail } = req.body;
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const updateDoc = {
+
+      //update in parcel db
+      const queryParcel = { _id: new ObjectId(id) };
+      const updateDocParcel = {
         $set: {
           deliveryStatus: "riderAssigned",
           riderId: riderId,
@@ -197,27 +199,56 @@ async function run() {
           riderEmail: riderEmail,
         },
       };
-      const result = await parcelsCollection.updateOne(query, updateDoc);
+      const resultParcel = await parcelsCollection.updateOne(
+        queryParcel,
+        updateDocParcel,
+      );
+
+      //update in rider db
+      const queryRider = { _id: new ObjectId(riderId) };
+      const updateDocRider = {
+        $set: {
+          workStatus: "assignedForPickup",
+        },
+      };
+      const resultRider = await ridersCollection.updateOne(
+        queryRider,
+        updateDocRider,
+      );
       console.log(riderEmail, id);
-      res.send(result);
+      res.send(resultParcel, resultRider);
     });
 
     app.get("/parcels", varifyFirebaseToken, async (req, res) => {
       const query = {};
-      const { email, deliveryStatus } = req.query;
+      const { email, deliveryStatus, parcelId, riderEmail } = req.query;
 
       if (email) {
         query.senderEmail = email;
+      }
+      if (riderEmail) {
+        query.riderEmail = riderEmail;
       }
 
       if (deliveryStatus) {
         query.deliveryStatus = deliveryStatus;
       }
 
+      if (parcelId) {
+        query.parcelId = parcelId;
+      }
       const options = { sort: { createdAt: -1 } };
       const cursor = parcelsCollection.find(query, options);
       const result = await cursor.toArray();
       res.send(result);
+    });
+
+    app.get("/track/:trackingId", async (req, res) => {
+      const trackingId = req.params.trackingId;
+
+      const parcel = await parcelsCollection.findOne({ trackingId });
+
+      res.send(parcel);
     });
 
     app.get("/parcel/:id", varifyFirebaseToken, async (req, res) => {
@@ -330,6 +361,7 @@ async function run() {
           {
             $set: {
               payment_status: "paid",
+              paidAt: new Date(),
               deliveryStatus: "pending-pickup",
               trackingId,
               transactionId,
