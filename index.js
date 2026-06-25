@@ -209,6 +209,7 @@ async function run() {
       const updateDocRider = {
         $set: {
           workStatus: "assignedForPickup",
+          assignedForPickupAt: new Date(),
         },
       };
       const resultRider = await ridersCollection.updateOne(
@@ -240,6 +241,37 @@ async function run() {
       const options = { sort: { createdAt: -1 } };
       const cursor = parcelsCollection.find(query, options);
       const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    app.patch("/parcelStatus/:id", async (req, res) => {
+      const { id } = req.params;
+      const { deliveryStatus } = req.body;
+
+      const updateData = {
+        deliveryStatus,
+      };
+
+      // Add timestamp based on status
+      if (deliveryStatus === "parcelAcceptedByRider") {
+        updateData.acceptedAt = new Date();
+      }
+
+      if (deliveryStatus === "parcelPickedByRider") {
+        updateData.pickedUpAt = new Date();
+      }
+
+      if (deliveryStatus === "parcelDelivered") {
+        updateData.deliveredAt = new Date();
+      }
+
+      const result = await parcelsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: updateData,
+        },
+      );
+
       res.send(result);
     });
 
