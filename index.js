@@ -142,6 +142,15 @@ async function run() {
       res.send(result);
     });
 
+    //getting data for statics/dashboard page
+    app.get("/rider", async (req, res) => {
+      const query = req.query.email;
+      const result = await ridersCollection.findOne({
+        email: query,
+      });
+      res.send(result);
+    });
+
     app.get("/users/:email/role", varifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
       const result = await usersCollection.findOne({ email });
@@ -246,7 +255,7 @@ async function run() {
 
     app.patch("/parcelStatus/:id", async (req, res) => {
       const { id } = req.params;
-      const { deliveryStatus } = req.body;
+      const { deliveryStatus, riderId } = req.body;
 
       const updateData = {
         deliveryStatus,
@@ -271,6 +280,52 @@ async function run() {
           $set: updateData,
         },
       );
+
+      if (
+        deliveryStatus === "parcelDelivered" ||
+        deliveryStatus === "rejectedByRider"
+      ) {
+        const riderUpdate = {
+          workStatus: "available",
+        };
+
+        // Give payment only after successful delivery
+        if (deliveryStatus === "parcelDelivered") {
+          const parcel = await parcelsCollection.findOne({
+            _id: new ObjectId(id),
+          });
+
+          const weight = Number(parcel.parcelWeight);
+
+          let earning = 40;
+
+          if (weight > 5) {
+            earning += (weight - 5) * 10;
+          }
+
+          await ridersCollection.updateOne(
+            { _id: new ObjectId(riderId) },
+            {
+              $set: riderUpdate,
+              $inc: {
+                totalEarnings: earning,
+                completedDeliveries: 1,
+              },
+            },
+          );
+        } else {
+          // Rider rejected the parcel
+          await ridersCollection.updateOne(
+            { _id: new ObjectId(riderId) },
+            {
+              $set: riderUpdate,
+              $inc: {
+                rejectedDeliveries: 1,
+              },
+            },
+          );
+        }
+      }
 
       res.send(result);
     });
@@ -486,7 +541,15 @@ async function run() {
 
         const result = await ridersCollection.updateOne(
           { _id: new ObjectId(id) },
-          { $set: { status: status, workStatus: "available" } },
+          {
+            $set: {
+              status: status,
+              workStatus: "available",
+              totalEarnings: 0,
+              completedDeliveries: 0,
+              rejectedDeliveries: 0,
+            },
+          },
         );
 
         if (status === "approved") {
